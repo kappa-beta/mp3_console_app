@@ -1,0 +1,10 @@
+click==7.1.1
+filetype==1.0.6
+itsdangerous==1.1.0
+Jinja2==2.11.1
+MarkupSafe==1.1.1
+mp3-tagger==1.0
+packaging==20.3
+pyparsing==2.4.7
+six==1.14.0
+Werkzeug==1.0.1
