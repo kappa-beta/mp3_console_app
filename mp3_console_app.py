@@ -1,23 +1,80 @@
 import click
 import os
-# import logging
-from mp3_tagger import MP3File, VERSION_1, VERSION_2, VERSION_BOTH
+from mp3_tagger import MP3File, VERSION_2
+
+"""
+Программа группирует файлы, анализируя ID3-теги по папкам:
+<директория назначения>/<исполнитель>/<альбом>/<имя файла>.mp3.\n\r
+Переименовывает файлы по схеме:
+<название трека> - <исполнитель> - <альбом>.mp3.\n\r
+Если в тегах нет информации о названии трека, использует оригинальное имя файла.\n\r
+Если в тегах нет информации об исполнителе или альбоме, пропускает файл,
+оставляя его без изменений в исходной директории.
+
+Консольные команды:\n\r
+--help - выводит справочное сообщение;\n\r
+-s | --src-dir - исходная директория, по умолчанию директория в которой запущен скрипт;\n\r
+-d | --dst-dir - целевая директория, по умолчанию директория в которой запущен скрипт.
+"""
 
 
-# logging.basicConfig(filename="info.log", level=logging.INFO)
+def check_src(src_dir):
+    """Проверяет возможность перехода в исходный каталог
 
+    src_dir: путь к исходному каталогу, тип str
+    return: True, тип boolean
 
-def change_dir(dir_path):
+    Обрабатывает ошибки: FileNotFoundError, PermissionError
+
+    """
     try:
-        os.chdir(dir_path)
-        return os.getcwd()
+        os.chdir(src_dir)
+        return True
     except FileNotFoundError:
-        click.echo(f'Каталог не найден: {dir_path}')
+        click.echo(f'Каталог не найден: {src_dir}')
     except PermissionError:
-        click.echo(f'Недостаточно прав на работу с каталогом: {dir_path}')
+        click.echo(f'Недостаточно прав на работу с каталогом: {src_dir}')
+
+
+def check_dst(dst_dir):
+    """Проверяет возможность перехода или налчие целевого каталога
+
+    dst_dir: путь к исходному каталогу, тип str
+    return: True, тип boolean
+
+    Обрабатывает ошибки: FileNotFoundError, PermissionError
+
+    """
+    try:
+        os.chdir(dst_dir)
+        return True
+    except FileNotFoundError:
+        os.mkdir(dst_dir)
+        return True
+    except PermissionError:
+        click.echo(f'Недостаточно прав на работу с каталогом: {dst_dir}')
+
+
+def tag_cleaner(tag):
+    """Удаляет из строки символы переноса строки, нулевые байты и пробелы с конца строки."""
+    if tag:
+        tag = tag \
+            .replace("\n", "") \
+            .replace("\r", "") \
+            .rstrip('\x00') \
+            .rstrip(' ') \
+            .lstrip(' ')
+    else:
+        tag = None
+    return tag
 
 
 def mp3_files_list():
+    """Формирует список .mp3 файлов текущей директории.
+
+    return: список файлов, тип list.
+
+    """
     files = os.listdir()
     mp3_files = []
     for i in files:
@@ -26,50 +83,80 @@ def mp3_files_list():
     return mp3_files
 
 
-def mp3_files_sort(mp3_files, dst_dir):
-    src_dir = os.getcwd()
-    for path_to_mp3 in mp3_files:
-        try:
-            with open(path_to_mp3, mode='rb+'):
-                pass
-        except PermissionError:
-            click.echo(f'Недостаточно прав на работу с файлом: {path_to_mp3}')
-            continue
-        mp3 = MP3File(path_to_mp3)
+def mp3_tags_list(mp3_file):
+    """Формирует список тегов
+
+    mp3_file: имя файла в текущей директории, тип str
+    return: список тегов, тип list
+
+    Обрабатывает ошибки: PermissionError
+
+    """
+    try:
+        mp3 = MP3File(mp3_file)
         mp3.set_version(VERSION_2)
-        if mp3.album and mp3.artist:
-            if mp3.song:
-                album = str(mp3.album)
-                artist = str(mp3.artist)
-                song = str(mp3.song)
-                new_file_name = song + ' - ' + artist + ' - ' + album + '.mp3'
+        artist = tag_cleaner(mp3.artist)
+        album = tag_cleaner(mp3.album)
+        song = tag_cleaner(mp3.song)
+        return [artist, album, song]
+    except PermissionError:
+        click.echo(f'Недостаточно прав на работу с файлом: {mp3_file}')
+
+
+def mp3_file_replace(mp3_file, old_path_name, new_path_name):
+    """Перемещает или копирует с заменой .mp3 файлы из текущей в целевую директорию.
+
+    mp3_file: имя файла в текущей директории, тип str;
+    old_path_name: абсолютный путь к файлу в текущей директории, тип str;
+    new_path_name: абсолютный путь к файлу в целевой директории, тип str.
+
+    Обрабатывает ошибки: FileExistsError, OSError.
+
+    """
+    try:
+        os.renames(old_path_name, new_path_name)
+        click.echo(f'{old_path_name} -> {new_path_name}')
+    except FileExistsError:
+        os.replace(old_path_name, new_path_name)
+        click.echo(f'{old_path_name} -> {new_path_name}')
+    except OSError:
+        click.echo(f'Ошибка при переименовании/перемещении файла: {mp3_file}')
+
+
+def mp3_files_sort(mp3_files, src_dir, dst_dir):
+    """Сортирует .mp3 файлы в целевую директорию по папкам
+
+    mp3_files: список .mp3 файлов, тип list;
+    src_dir: путь к исходной директории, тип str;
+    dst_dir: путь к целевой директории, тип str.
+
+    """
+    for mp3_file in mp3_files:
+        if mp3_tags_list(mp3_file):
+            artist, album, song = mp3_tags_list(mp3_file)
+            if artist and album:
+                if song:
+                    new_file_name = song + ' - ' + artist + ' - ' + album + '.mp3'
+                else:
+                    new_file_name = str(mp3_file)
+                old_path_name = os.path.join(src_dir, mp3_file)
+                new_path_name = os.path.join(dst_dir, artist, album, new_file_name)
+                mp3_file_replace(mp3_file, old_path_name, new_path_name)
             else:
-                new_file_name = str(path_to_mp3)
-            old_path_name = os.path.join(src_dir, str(path_to_mp3))
-            new_path_name = os.path.join(dst_dir, str(mp3.artist), str(mp3.album), new_file_name)
-            click.echo(f'{path_to_mp3} -> {new_path_name}')
-            # logging.info(f'{old_path_name}->{new_path_name};')
-            try:
-                os.renames(old_path_name, new_path_name)
-            except OSError:
-                click.echo(f'Синтаксическая ошибка в имени файла: {path_to_mp3}')
-            except ValueError:
-                click.echo(f'Некорректное значение пути к файлу: {path_to_mp3}')
-        else:
-            click.echo(f'Альбом или исполнитель неизвестны в файле: {path_to_mp3}')
+                click.echo(f'Альбом или исполнитель неизвестны в файле: {mp3_file}')
 
 
 # Запуск консольного приложения
 @click.command()
 @click.option('-s', '--src-dir', default=os.getcwd(), help='source directory')
 @click.option('-d', '--dst-dir', default=os.getcwd(), help='target directory')
-def func(src_dir, dst_dir):
-    "Sort mp3 files artist -> album -> song"
+def main_func(src_dir, dst_dir):
+    """Программа для сортировки mp3 файлов по папкам."""
 
-    if change_dir(dst_dir) and change_dir(src_dir):
+    if check_dst(dst_dir) and check_src(src_dir):
         mp3_files = mp3_files_list()
-        mp3_files_sort(mp3_files, dst_dir)
+        mp3_files_sort(mp3_files, src_dir, dst_dir)
 
 
 if __name__ == '__main__':
-    func()
+    main_func()
